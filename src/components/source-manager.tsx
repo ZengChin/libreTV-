@@ -712,8 +712,9 @@ function HomePanel() {
         <SelectRow
           label="推荐数据源"
           value={store.recommendSource}
-          onChange={(v) => store.updateSettings({ recommendSource: v as 'douban' | 'bangumi' | 'hot-list' })}
+          onChange={(v) => store.updateSettings({ recommendSource: v as 'overview' | 'douban' | 'bangumi' | 'hot-list' })}
           options={[
+            { value: 'overview', label: '综合推荐', hint: '电影/剧集/动漫/综艺多分类一屏浏览' },
             { value: 'douban', label: '豆瓣', hint: '热门电影与剧集' },
             { value: 'bangumi', label: 'Bangumi', hint: '每日新番放送（免 key）' },
             { value: 'hot-list', label: '影视榜单', hint: '豆瓣周榜 / 百度热播' },

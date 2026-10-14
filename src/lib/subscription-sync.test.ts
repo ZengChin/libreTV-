@@ -136,13 +136,13 @@ describe('applyEnvPresets', () => {
 
 describe('applyEnvPresets · DEFAULT_RECOMMEND_SOURCE（issue #918）', () => {
   it('未配置时不改动推荐数据源', async () => {
-    useAppStore.setState({ recommendSource: 'hot-list', recommendSourceTouched: false });
+    useAppStore.setState({ recommendSource: 'overview', recommendSourceTouched: false });
     await applyEnvPresets(status());
-    expect(useAppStore.getState().recommendSource).toBe('hot-list');
+    expect(useAppStore.getState().recommendSource).toBe('overview');
   });
 
   it('对未主动选择过的用户应用部署者默认值，且不打「已选择」标记', async () => {
-    useAppStore.setState({ recommendSource: 'hot-list', recommendSourceTouched: false });
+    useAppStore.setState({ recommendSource: 'overview', recommendSourceTouched: false });
     await applyEnvPresets(status({ defaultRecommendSource: 'douban' }));
     expect(useAppStore.getState().recommendSource).toBe('douban');
     // 自动预置不算用户主动选择：部署者日后调整默认值时该用户应跟随
@@ -168,7 +168,7 @@ describe('applyEnvPresets · DEFAULT_RECOMMEND_SOURCE（issue #918）', () => {
   });
 
   it('重复调用幂等：应用一次后再调用不改变结果', async () => {
-    useAppStore.setState({ recommendSource: 'hot-list', recommendSourceTouched: false });
+    useAppStore.setState({ recommendSource: 'overview', recommendSourceTouched: false });
     await applyEnvPresets(status({ defaultRecommendSource: 'douban' }));
     await applyEnvPresets(status({ defaultRecommendSource: 'douban' }));
     expect(useAppStore.getState().recommendSource).toBe('douban');

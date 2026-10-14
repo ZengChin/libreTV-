@@ -80,6 +80,17 @@ export interface DoubanResponse {
   items: DoubanItem[];
 }
 
+/** 综合推荐的一行（一个豆瓣分类，横向滚动展示） */
+export interface DoubanOverviewRow {
+  id: string;
+  title: string;
+  /** 所属分组：电影 / 电视剧 / 动漫 / 综艺（前端按分组渲染大标题） */
+  group: 'movie' | 'tv' | 'anime' | 'variety';
+  /** 该行数据是否获取成功；false 时 items 为空，前端隐藏该行 */
+  ok: boolean;
+  items: DoubanItem[];
+}
+
 export interface BangumiCalendarDay {
   /** 1=周一 … 7=周日 */
   weekday: number;
@@ -103,7 +114,7 @@ export interface AuthStatusResponse {
   /** 部署者通过 DEFAULT_SUBSCRIPTIONS 环境变量预置的 SourceList 订阅链接（未配置时为空数组） */
   defaultSubscriptions: { url: string; name?: string }[];
   /** 部署者通过 DEFAULT_RECOMMEND_SOURCE 环境变量指定的首页推荐数据源默认值（未配置时为 null） */
-  defaultRecommendSource: 'douban' | 'bangumi' | 'hot-list' | null;
+  defaultRecommendSource: 'douban' | 'bangumi' | 'hot-list' | 'overview' | null;
   /** 部署者通过 DEFAULT_IMAGE_MODE 环境变量指定的封面图加载方式默认值（未配置时为 null） */
   defaultImageMode: 'direct' | 'proxy' | null;
 }

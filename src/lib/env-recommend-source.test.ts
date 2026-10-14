@@ -22,8 +22,9 @@ describe('getEnvRecommendSource', () => {
     }
   });
 
-  it('三个合法取值（大小写不敏感，自动去空白）', () => {
+  it('四个合法取值（大小写不敏感，自动去空白）', () => {
     for (const [raw, expected] of [
+      ['overview', 'overview'],
       ['douban', 'douban'],
       ['BANGUMI', 'bangumi'],
       [' hot-list ', 'hot-list'],

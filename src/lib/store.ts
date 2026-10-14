@@ -17,8 +17,8 @@ export interface AppSettings {
   yellowFilter: boolean;
   adFilter: boolean;
   doubanEnabled: boolean;
-  /** 首页推荐数据源：豆瓣热门 / Bangumi 每日放送（免 key）/ 影视热榜（60s API） */
-  recommendSource: 'douban' | 'bangumi' | 'hot-list';
+  /** 首页推荐数据源：综合推荐（多分类一屏）/ 豆瓣热门 / Bangumi 每日放送（免 key）/ 影视热榜（60s API） */
+  recommendSource: 'overview' | 'douban' | 'bangumi' | 'hot-list';
   /** 用户是否在设置中主动选择过推荐数据源；为 false 时部署者的 DEFAULT_RECOMMEND_SOURCE 默认值可生效 */
   recommendSourceTouched: boolean;
   autoplayNext: boolean;
@@ -292,7 +292,8 @@ export const useAppStore = create<AppState>()(
       yellowFilter: true,
       adFilter: true,
       doubanEnabled: true,
-      recommendSource: 'hot-list',
+      // 出厂默认改为综合推荐：一屏看全电影/剧集/动漫/综艺多个分类的热门内容
+      recommendSource: 'overview',
       recommendSourceTouched: false,
       autoplayNext: true,
       // 直连优先：豆瓣封面有公共镜像 + 内置代理两级兜底（见 buildImageCandidates），
@@ -741,8 +742,10 @@ export const useAppStore = create<AppState>()(
       storage: createJSONStorage(createThrottledStorage),
       // v1：直播源新增归属字段、最近观看新增 sourceUrl。
       // v2：直播源归属改为多引用（fromSubscription 单值 → fromSubscriptions 数组）。
+      // v3：首页推荐新增「综合推荐」数据源并设为出厂默认；从未主动选择过的
+      //     存量用户（仍是旧默认 hot-list 且无「已选择」标记）迁移到 overview。
       // 此前未声明 version 的存量数据会被视为 v0 并走 migrate 补齐。
-      version: 2,
+      version: 3,
       migrate: (persisted, version) => {
         const state = { ...((persisted ?? {}) as Partial<AppState>) };
         if (!Array.isArray(state.liveRecent)) state.liveRecent = [];
@@ -764,6 +767,16 @@ export const useAppStore = create<AppState>()(
               fromSubscriptions,
             };
           });
+        }
+        if (version < 3) {
+          // 从未主动选择过推荐数据源、仍停留在旧出厂默认值的用户跟随新默认；
+          // 显式选过（含旧版本手动改过的）一律保留，部署者的环境变量默认值也不覆盖他们
+          const valid: AppState['recommendSource'][] = ['overview', 'douban', 'bangumi', 'hot-list'];
+          if (!valid.includes(state.recommendSource as AppState['recommendSource'])) {
+            state.recommendSource = 'overview';
+          } else if (state.recommendSource === 'hot-list' && !state.recommendSourceTouched) {
+            state.recommendSource = 'overview';
+          }
         }
         return state as AppState;
       },

@@ -5,14 +5,23 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/client-api';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
-import type { DoubanItem } from '@/lib/types';
+import type { DoubanItem, DoubanOverviewRow } from '@/lib/types';
 import { DoubanCard } from './video-card';
+import { Icon } from './icon';
 
-const MOVIE_TAGS = ['热门', '最新', '经典', '豆瓣高分', '冷门佳片', '华语', '欧美', '韩国', '日本', '动画'];
+const MOVIE_TAGS = ['热门', '最新', '经典', '豆瓣高分', '冷门佳片', '华语', '欧美', '韩国', '日本', '动画', '动作', '喜剧', '爱情', '科幻', '恐怖'];
 const TV_TAGS = ['热门', '美剧', '英剧', '韩剧', '日剧', '国产剧', '港剧', '日本动画', '综艺', '纪录片'];
 const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-/** 首页推荐区：数据源由设置决定（豆瓣热门 / Bangumi 新番放送 / 影视热榜），二选一展示 */
+/** 综合推荐的分组展示顺序与标题（与服务端 OVERVIEW_GROUPS 对应） */
+const OVERVIEW_GROUPS = [
+  { id: 'movie', title: '电影' },
+  { id: 'tv', title: '电视剧' },
+  { id: 'anime', title: '动漫' },
+  { id: 'variety', title: '综艺' },
+] as const;
+
+/** 首页推荐区：数据源由设置决定（综合推荐 / 豆瓣热门 / Bangumi 新番放送 / 影视热榜） */
 export function RecommendSection({ onPick }: { onPick: (title: string) => void }) {
   const doubanEnabled = useAppStore((s) => s.doubanEnabled);
   const recommendSource = useAppStore((s) => s.recommendSource);
@@ -20,7 +29,89 @@ export function RecommendSection({ onPick }: { onPick: (title: string) => void }
   if (!doubanEnabled) return null;
   if (recommendSource === 'bangumi') return <BangumiView onPick={onPick} />;
   if (recommendSource === 'hot-list') return <HotListView onPick={onPick} />;
-  return <DoubanView onPick={onPick} />;
+  if (recommendSource === 'douban') return <DoubanView onPick={onPick} />;
+  return <OverviewView onPick={onPick} />;
+}
+
+/**
+ * 综合推荐：一次拉取多个豆瓣分类，按「电影 / 电视剧 / 动漫 / 综艺」分组，
+ * 每个分类一行横向滚动。单个分类失败只隐藏该行，不影响其余内容。
+ */
+function OverviewView({ onPick }: { onPick: (title: string) => void }) {
+  const query = useQuery({
+    queryKey: ['douban-overview'],
+    queryFn: ({ signal }) => api.doubanOverview(signal),
+    // 与搜索一致的 5 分钟新鲜度：从播放页返回首页不重复拉取（服务端另有 10min 缓存兜底）
+    staleTime: 300_000,
+  });
+
+  if (query.isError) {
+    return (
+      <div className="text-center py-10">
+        <p className="text-sm text-faint mb-3">推荐内容加载失败，可稍后重试或在设置中关闭</p>
+        <button className="btn-ghost btn-sm" onClick={() => void query.refetch()}>
+          <Icon name="refresh" className="w-3.5 h-3.5" />
+          重试
+        </button>
+      </div>
+    );
+  }
+  if (query.isLoading) return <GridSkeleton />;
+
+  // 抓取失败的行（ok=false）直接隐藏；全失败时接口返回 502，走上面的错误态
+  const rows = (query.data?.rows ?? []).filter((r) => r.ok && r.items.length > 0);
+  if (rows.length === 0) {
+    return <p className="text-center text-sm text-faint py-8">暂无推荐内容</p>;
+  }
+
+  const groups = OVERVIEW_GROUPS
+    .map((g) => ({ ...g, rows: rows.filter((r) => r.group === g.id) }))
+    .filter((g) => g.rows.length > 0);
+
+  return (
+    <section aria-label="综合推荐" className="space-y-8">
+      {groups.map((group) => (
+        <div key={group.id}>
+          <GroupHeader title={group.title} />
+          <div className="space-y-5 mt-3">
+            {group.rows.map((row) => (
+              <PosterRow key={row.id} row={row} onPick={onPick} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/** 分组大标题（电影 / 电视剧 / 动漫 / 综艺） */
+function GroupHeader({ title }: { title: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span aria-hidden className="w-1 h-4 rounded-full bg-accent" />
+      <h2 className="text-base font-semibold text-content">{title}</h2>
+    </div>
+  );
+}
+
+/** 一个分类一行：标题 + 横向滚动海报墙 */
+function PosterRow({ row, onPick }: { row: DoubanOverviewRow; onPick: (title: string) => void }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-2">
+        <h3 className="text-sm font-medium text-content">{row.title}</h3>
+        <span className="text-xs text-faint">{row.items.length} 部</span>
+      </div>
+      {/* 横向滚动：snap 对齐 + 细滚动条；视口外卡片图片 lazy 加载，不额外请求 */}
+      <div className="flex gap-2.5 overflow-x-auto pb-1 snap-x scrollbar-thin">
+        {row.items.map((item) => (
+          <div key={item.id} className="w-[104px] sm:w-[116px] shrink-0 snap-start">
+            <DoubanCard item={item} onClick={() => onPick(item.title)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**
