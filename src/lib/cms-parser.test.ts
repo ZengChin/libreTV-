@@ -3,8 +3,10 @@ import {
   extractEpisodesFromPlayUrl,
   extractM3u8FromText,
   filterAdultResults,
+  filterCommentaryResults,
   filterRelevantResults,
   isAdultContent,
+  isCommentary,
   isRelevant,
   normalizeTitle,
   parseDetail,
@@ -202,5 +204,54 @@ describe('filterRelevantResults', () => {
   it('全部不相关时回退为原列表', () => {
     const junk = [{ name: '爸爸当家' }, { name: '爸爸别走' }];
     expect(filterRelevantResults(junk, wd)).toEqual(junk);
+  });
+});
+
+describe('isCommentary / filterCommentaryResults', () => {
+  it('识别解说/速看类二创内容', () => {
+    expect(isCommentary('流浪地球【影视解说】')).toBe(true);
+    expect(isCommentary('给阿嬷的情书[电影解说]')).toBe(true);
+    expect(isCommentary('肖申克的救赎 一口气看完')).toBe(true);
+    expect(isCommentary('周处除三害 分钟速看')).toBe(true);
+    expect(isCommentary('热门电影盘点')).toBe(true);
+    // 正片标题不应误判
+    expect(isCommentary('流浪地球')).toBe(false);
+    expect(isCommentary('摔跤吧！爸爸')).toBe(false);
+    expect(isCommentary('')).toBe(false);
+    expect(isCommentary(undefined)).toBe(false);
+  });
+
+  it('有正片结果时丢弃解说/速看条目', () => {
+    const items = [
+      { name: '给阿嬷的情书[电影解说]' },
+      { name: '给阿嬷的情书' },
+      { name: '流浪地球 一口气看完' },
+      { name: '流浪地球' },
+    ];
+    const out = filterCommentaryResults(items, '电影');
+    expect(out.map((i) => i.name)).toEqual(['给阿嬷的情书', '流浪地球']);
+  });
+
+  it('全部是解说时回退为原列表（obscure 标题至少能看解说版）', () => {
+    const items = [{ name: '冷门片[电影解说]' }, { name: '冷门片 一口气看完' }];
+    expect(filterCommentaryResults(items, '冷门片')).toEqual(items);
+  });
+
+  it('用户明确搜解说类内容时不过滤', () => {
+    const items = [{ name: '流浪地球【影视解说】' }, { name: '流浪地球' }];
+    expect(filterCommentaryResults(items, '流浪地球 解说')).toEqual(items);
+    expect(filterCommentaryResults(items, '电影解说')).toEqual(items);
+  });
+
+  it('与相关性过滤串联：解说条目先被相关性保留、再被解说过滤移除', () => {
+    const items = [
+      { name: '摔跤吧！爸爸' },
+      { name: '摔跤吧!爸爸【影视解说】' },
+      { name: '爸爸去哪儿第三季' },
+    ];
+    const relevant = filterRelevantResults(items, '摔跤吧！爸爸');
+    expect(relevant).toHaveLength(2);
+    const out = filterCommentaryResults(relevant, '摔跤吧！爸爸');
+    expect(out.map((i) => i.name)).toEqual(['摔跤吧！爸爸']);
   });
 });

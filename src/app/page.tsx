@@ -8,6 +8,7 @@ import { RecommendSection } from '@/components/douban-section';
 import { DetailModal } from '@/components/detail-modal';
 import { AggregatedCard, aggregateResults } from '@/components/video-card';
 import { useAppStore, resolveSource, isInDisabledSubscription, isSourceDisabled } from '@/lib/store';
+import { filterCommentaryResults } from '@/lib/cms-parser';
 import { api } from '@/lib/client-api';
 import type { SearchResultItem, SourceSearchOutcome } from '@/lib/types';
 import { SearchHistoryDropdown, useSearchHistory } from '@/components/search-history';
@@ -142,9 +143,11 @@ function HomeContent() {
 
   const isSearching = Boolean(urlQuery) && searchQuery.isFetching && !searchQuery.data;
   // 聚合数据未就绪时，用已结算源的结果增量渲染（健康源不再等坏源超时）
+  // 流式增量渲染期间也过滤「XX解说」类速看内容，与最终聚合结果（服务端已过滤）保持一致，
+  // 避免正片就绪前解说卡片先闪一下；全部结果都是解说时保留原样
   const streamedList = useMemo(
-    () => streamedOutcomes.flatMap((o) => o.list),
-    [streamedOutcomes]
+    () => filterCommentaryResults(streamedOutcomes.flatMap((o) => o.list), urlQuery),
+    [streamedOutcomes, urlQuery]
   );
   const list = useMemo(
     () => searchQuery.data?.list ?? (isSearching ? streamedList : []),

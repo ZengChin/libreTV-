@@ -206,3 +206,30 @@ export function filterRelevantResults<T extends { name?: string }>(items: T[], w
   const filtered = items.filter((item) => isRelevant(item.name || '', wd));
   return filtered.length > 0 ? filtered : items;
 }
+
+/**
+ * 解说/速看类内容特征：「XX解说」「一口气看完」「分钟速看」「精彩盘点」等
+ * 二创速看内容。采集站普遍把这类内容混在正片结果里（搜电影名常排在正片前），
+ * 标题带方括号装饰的尤为常见（如「流浪地球【影视解说】」）。
+ */
+const COMMENTARY_KEYWORDS = [
+  '解说', '解說', '讲解', '一口气', '分钟看完', '分钟速看', '速看',
+  '精华', '看点', '混剪', '盘点', '看片', '刷片', '说剧', '說劇',
+];
+
+/** 标题是否为解说/速看类内容（非正片） */
+export function isCommentary(name: string | undefined): boolean {
+  if (!name) return false;
+  return COMMENTARY_KEYWORDS.some((k) => name.includes(k));
+}
+
+/**
+ * 解说/速看内容过滤：有正片结果时丢弃「XX解说」类条目，避免正片被二创内容
+ * 挤出搜索结果；全部结果都是解说时回退为原列表—— obscure 标题至少能看解说版。
+ * 用户明确搜的是解说类内容（关键词本身含解说等）时不过滤。
+ */
+export function filterCommentaryResults<T extends { name?: string }>(items: T[], wd: string): T[] {
+  if (isCommentary(wd)) return items;
+  const filtered = items.filter((item) => !isCommentary(item.name));
+  return filtered.length > 0 ? filtered : items;
+}

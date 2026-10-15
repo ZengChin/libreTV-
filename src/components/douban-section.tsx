@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/client-api';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
@@ -13,13 +13,8 @@ const MOVIE_TAGS = ['热门', '最新', '经典', '豆瓣高分', '冷门佳片'
 const TV_TAGS = ['热门', '美剧', '英剧', '韩剧', '日剧', '国产剧', '港剧', '日本动画', '综艺', '纪录片'];
 const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-/** 综合推荐的分组展示顺序与标题（与服务端 OVERVIEW_GROUPS 对应） */
-const OVERVIEW_GROUPS = [
-  { id: 'movie', title: '电影' },
-  { id: 'tv', title: '电视剧' },
-  { id: 'anime', title: '动漫' },
-  { id: 'variety', title: '综艺' },
-] as const;
+/** 综合推荐初始展示的分类（服务端 OVERVIEW_CATEGORIES 的首个分类） */
+const DEFAULT_CATEGORY = 'movie';
 
 /** 首页推荐区：数据源由设置决定（综合推荐 / 豆瓣热门 / Bangumi 新番放送 / 影视热榜） */
 export function RecommendSection({ onPick }: { onPick: (title: string) => void }) {
@@ -34,67 +29,97 @@ export function RecommendSection({ onPick }: { onPick: (title: string) => void }
 }
 
 /**
- * 综合推荐：一次拉取多个豆瓣分类，按「电影 / 电视剧 / 动漫 / 综艺」分组，
- * 每个分类一行横向滚动。单个分类失败只隐藏该行，不影响其余内容。
+ * 综合推荐：顶部分类导航（电影 / 电视剧 / 动漫 / 综艺）+ 每个分类下的题材行
+ * （热门、格斗、科幻、惊悚……）。按分类懒加载并各自缓存，切回已看过的分类瞬间呈现。
  */
 function OverviewView({ onPick }: { onPick: (title: string) => void }) {
+  const [active, setActive] = useState(DEFAULT_CATEGORY);
+  const listRef = useRef<HTMLDivElement>(null);
+  const firstRender = useRef(true);
+
   const query = useQuery({
-    queryKey: ['douban-overview'],
-    queryFn: ({ signal }) => api.doubanOverview(signal),
+    queryKey: ['douban-overview', active],
+    queryFn: ({ signal }) => api.doubanOverview(active, signal),
+    // 切换分类时保留旧内容，避免列表空白闪烁
+    placeholderData: keepPreviousData,
     // 与搜索一致的 5 分钟新鲜度：从播放页返回首页不重复拉取（服务端另有 10min 缓存兜底）
     staleTime: 300_000,
   });
 
-  if (query.isError) {
-    return (
-      <div className="text-center py-10">
-        <p className="text-sm text-faint mb-3">推荐内容加载失败，可稍后重试或在设置中关闭</p>
-        <button className="btn-ghost btn-sm" onClick={() => void query.refetch()}>
-          <Icon name="refresh" className="w-3.5 h-3.5" />
-          重试
-        </button>
-      </div>
-    );
-  }
-  if (query.isLoading) return <GridSkeleton />;
+  // 切换分类后把题材列表滚回导航下方（首次进入不滚动，避免打断首屏定位）
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    listRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [active]);
 
-  // 抓取失败的行（ok=false）直接隐藏；全失败时接口返回 502，走上面的错误态
-  const rows = (query.data?.rows ?? []).filter((r) => r.ok && r.items.length > 0);
-  if (rows.length === 0) {
-    return <p className="text-center text-sm text-faint py-8">暂无推荐内容</p>;
-  }
-
-  const groups = OVERVIEW_GROUPS
-    .map((g) => ({ ...g, rows: rows.filter((r) => r.group === g.id) }))
-    .filter((g) => g.rows.length > 0);
+  const categories = query.data?.categories ?? [];
+  const rows = (query.data?.category.rows ?? []).filter((r) => r.ok && r.items.length > 0);
 
   return (
-    <section aria-label="综合推荐" className="space-y-8">
-      {groups.map((group) => (
-        <div key={group.id}>
-          <GroupHeader title={group.title} />
-          <div className="space-y-5 mt-3">
-            {group.rows.map((row) => (
-              <PosterRow key={row.id} row={row} onPick={onPick} />
+    <section aria-label="综合推荐">
+      {/* 顶部分类导航：吸顶在全局头部（h-14）下方，横向滚动适配窄屏 */}
+      <div className="sticky top-14 z-30 -mx-4 px-4 py-2.5 bg-surface/90 backdrop-blur border-b border-line mb-5">
+        <div className="flex gap-2 overflow-x-auto scrollbar-none">
+          {categories.length === 0 ? (
+            // 首屏加载中：导航占位
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-8 w-16 rounded-full bg-chip animate-pulse shrink-0" />
+            ))
+          ) : (
+            categories.map((c) => (
+              <button
+                key={c.id}
+                className={cn(
+                  'px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors',
+                  c.id === active ? 'bg-accent text-on-accent' : 'bg-chip text-muted hover:text-content hover:bg-hover'
+                )}
+                onClick={() => setActive(c.id)}
+                aria-pressed={c.id === active}
+              >
+                {c.name}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div ref={listRef} className="space-y-6">
+        {query.isError && rows.length === 0 ? (
+          <div className="text-center py-10">
+            <p className="text-sm text-faint mb-3">推荐内容加载失败，可稍后重试或在设置中关闭</p>
+            <button className="btn-ghost btn-sm" onClick={() => void query.refetch()}>
+              <Icon name="refresh" className="w-3.5 h-3.5" />
+              重试
+            </button>
+          </div>
+        ) : rows.length === 0 ? (
+          // 切换分类时的加载态：骨架屏（有旧数据时由 keepPreviousData 直接展示旧列表）
+          <div className="space-y-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i}>
+                <div className="h-4 w-20 rounded bg-chip animate-pulse mb-2" />
+                <div className="flex gap-2.5 overflow-hidden">
+                  {Array.from({ length: 8 }).map((_, j) => (
+                    <div key={j} className="w-[104px] sm:w-[116px] shrink-0">
+                      <div className="aspect-[2/3] rounded-lg bg-chip animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
-        </div>
-      ))}
+        ) : (
+          rows.map((row) => <PosterRow key={row.id} row={row} onPick={onPick} />)
+        )}
+      </div>
     </section>
   );
 }
 
-/** 分组大标题（电影 / 电视剧 / 动漫 / 综艺） */
-function GroupHeader({ title }: { title: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span aria-hidden className="w-1 h-4 rounded-full bg-accent" />
-      <h2 className="text-base font-semibold text-content">{title}</h2>
-    </div>
-  );
-}
-
-/** 一个分类一行：标题 + 横向滚动海报墙 */
+/** 一个题材一行：标题 + 横向滚动海报墙 */
 function PosterRow({ row, onPick }: { row: DoubanOverviewRow; onPick: (title: string) => void }) {
   return (
     <div>

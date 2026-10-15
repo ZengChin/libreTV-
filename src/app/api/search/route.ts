@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { guardRequest } from '@/lib/api-guard';
-import { cmsRequestHeaders, filterAdultResults, filterRelevantResults, normalizeTitle, parseSearchList } from '@/lib/cms-parser';
+import { cmsRequestHeaders, filterAdultResults, filterCommentaryResults, filterRelevantResults, normalizeTitle, parseSearchList } from '@/lib/cms-parser';
 import { fetchUpstream, getCache, setCache } from '@/lib/fetch-utils';
 import { checkUpstreamAllowed } from '@/lib/ssrf';
 import type { SearchResponse, SearchStreamEvent, SourceConfig, SourceSearchOutcome } from '@/lib/types';
@@ -163,6 +163,9 @@ function aggregateOutcomes(outcomes: SourceSearchOutcome[], wd: string, filterAd
   list = filterAdultResults(list, filterAdult);
   // 部分源站做分词/OR 模糊搜索（搜「摔跤吧！爸爸」返回一堆「爸爸XXX」），按关键词过滤
   list = filterRelevantResults(list, wd);
+  // 采集站常把「XX解说」「一口气看完」类速看内容混在正片结果里（甚至会排在正片前），
+  // 有正片结果时丢弃这类二创内容；用户明确搜解说类内容时不过滤
+  list = filterCommentaryResults(list, wd);
 
   // 精确命中（忽略标点差异）排在最前，其余按名称（与旧版一致），名称相同按源名
   const exact = normalizeTitle(wd);

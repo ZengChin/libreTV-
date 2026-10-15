@@ -88,6 +88,44 @@ describe('POST /api/search', () => {
     expect(data.list[0]?.name).toBe('测试剧');
   });
 
+  it('有正片结果时过滤「XX解说」「一口气看完」类速看内容', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          cmsList([
+            { vod_id: 10, vod_name: '给阿嬷的情书[电影解说]', type_name: '动作片' },
+            { vod_id: 11, vod_name: '给阿嬷的情书', type_name: '剧情片' },
+            { vod_id: 12, vod_name: '给阿嬷的情书 一口气看完', type_name: '剧情片' },
+          ]),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    );
+    const res = await POST(makeRequest({ wd: '给阿嬷的情书', sources: [SOURCES[0]], filterAdult: true }));
+    const data = (await res.json()) as { list: Array<{ vodId: string; name: string }> };
+    expect(data.list.map((i) => i.name)).toEqual(['给阿嬷的情书']);
+  });
+
+  it('用户明确搜解说类内容时保留解说结果', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          cmsList([
+            { vod_id: 10, vod_name: '流浪地球【影视解说】', type_name: '科幻片' },
+            { vod_id: 11, vod_name: '流浪地球', type_name: '科幻片' },
+          ]),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    );
+    const res = await POST(makeRequest({ wd: '流浪地球 解说', sources: [SOURCES[0]], filterAdult: true }));
+    const data = (await res.json()) as { list: Array<{ name: string }> };
+    // 关键词含「解说」：解说过滤整体跳过；同时相关性过滤只保留带「解说」的条目
+    expect(data.list.map((i) => i.name)).toEqual(['流浪地球【影视解说】']);
+  });
+
   it('内网字面量地址在发起请求前被 SSRF 校验拒绝', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);

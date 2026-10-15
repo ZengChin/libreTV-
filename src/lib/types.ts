@@ -80,15 +80,20 @@ export interface DoubanResponse {
   items: DoubanItem[];
 }
 
-/** 综合推荐的一行（一个豆瓣分类，横向滚动展示） */
+/** 综合推荐的一行（一个题材，如「科幻」「美剧」，横向滚动展示） */
 export interface DoubanOverviewRow {
   id: string;
   title: string;
-  /** 所属分组：电影 / 电视剧 / 动漫 / 综艺（前端按分组渲染大标题） */
-  group: 'movie' | 'tv' | 'anime' | 'variety';
   /** 该行数据是否获取成功；false 时 items 为空，前端隐藏该行 */
   ok: boolean;
   items: DoubanItem[];
+}
+
+/** 综合推荐的一个分类（如「电影」），含顶部分类导航信息与题材行 */
+export interface DoubanOverviewCategory {
+  id: string;
+  name: string;
+  rows: DoubanOverviewRow[];
 }
 
 export interface BangumiCalendarDay {

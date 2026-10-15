@@ -21,12 +21,18 @@ vi.mock('./fetch-utils', () => ({
 
 vi.mock('./douban', () => ({
   fetchDoubanRecommend: vi.fn(),
+  fetchDoubanCollection: vi.fn(),
 }));
 
-import { fetchDoubanOverview, OVERVIEW_GROUPS, OVERVIEW_ROWS } from './douban-overview';
-import { fetchDoubanRecommend } from './douban';
+import {
+  fetchDoubanCategory,
+  findCategorySpec,
+  OVERVIEW_CATEGORIES,
+} from './douban-overview';
+import { fetchDoubanCollection, fetchDoubanRecommend } from './douban';
 
-const mockedFetch = vi.mocked(fetchDoubanRecommend);
+const mockedRecommend = vi.mocked(fetchDoubanRecommend);
+const mockedCollection = vi.mocked(fetchDoubanCollection);
 
 function items(n: number): DoubanItem[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -36,85 +42,169 @@ function items(n: number): DoubanItem[] {
   }));
 }
 
-describe('OVERVIEW_ROWS 行配置', () => {
-  it('行 id 唯一、标题非空、type/tag/group 合法', () => {
-    const ids = new Set(OVERVIEW_ROWS.map((r) => r.id));
-    expect(ids.size).toBe(OVERVIEW_ROWS.length);
-    for (const row of OVERVIEW_ROWS) {
-      expect(row.title.length).toBeGreaterThan(0);
-      expect(['movie', 'tv']).toContain(row.type);
-      expect(row.tag.length).toBeGreaterThan(0);
-      expect(OVERVIEW_GROUPS.map((g) => g.id)).toContain(row.group);
+/** 全部行默认成功：合集 20 条、标签 18 条 */
+function mockAllOk() {
+  mockedCollection.mockResolvedValue(items(20));
+  mockedRecommend.mockResolvedValue(items(18));
+}
+
+describe('OVERVIEW_CATEGORIES 分类配置', () => {
+  it('分类 id 唯一、名称非空、每类至少一个题材行', () => {
+    const ids = new Set(OVERVIEW_CATEGORIES.map((c) => c.id));
+    expect(ids.size).toBe(OVERVIEW_CATEGORIES.length);
+    for (const category of OVERVIEW_CATEGORIES) {
+      expect(category.name.length).toBeGreaterThan(0);
+      expect(category.rows.length).toBeGreaterThan(0);
     }
   });
 
-  it('覆盖用户要求的电影 / 电视剧 / 动漫分类', () => {
-    const groups = new Set(OVERVIEW_ROWS.map((r) => r.group));
-    expect(groups.has('movie')).toBe(true);
-    expect(groups.has('tv')).toBe(true);
-    expect(groups.has('anime')).toBe(true);
-    // 动漫同时覆盖番剧（tv/日本动画）与动画电影（movie/动画）
-    expect(OVERVIEW_ROWS.some((r) => r.group === 'anime' && r.type === 'tv')).toBe(true);
-    expect(OVERVIEW_ROWS.some((r) => r.group === 'anime' && r.type === 'movie')).toBe(true);
+  it('行 id 全局唯一，且每行恰好使用一种数据源', () => {
+    const ids = OVERVIEW_CATEGORIES.flatMap((c) => c.rows.map((r) => r.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const category of OVERVIEW_CATEGORIES) {
+      for (const row of category.rows) {
+        const hasCollection = Boolean(row.collection);
+        const hasTag = Boolean(row.type && row.tag);
+        expect(hasCollection !== hasTag).toBe(true);
+        expect(row.title.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('合集 id 只含白名单字符', () => {
+    for (const category of OVERVIEW_CATEGORIES) {
+      for (const row of category.rows) {
+        if (row.collection) expect(row.collection).toMatch(/^[a-z0-9_]+$/);
+      }
+    }
+  });
+
+  it('覆盖电影 / 电视剧 / 动漫分类，且含用户点名的科幻/惊悚/格斗等题材', () => {
+    const ids = OVERVIEW_CATEGORIES.map((c) => c.id);
+    expect(ids).toContain('movie');
+    expect(ids).toContain('tv');
+    expect(ids).toContain('anime');
+
+    const movieRows = OVERVIEW_CATEGORIES.find((c) => c.id === 'movie')!.rows.map((r) => r.title);
+    expect(movieRows).toContain('科幻');
+    expect(movieRows).toContain('惊悚');
+    expect(movieRows).toContain('格斗');
+    expect(movieRows).toContain('热门');
+
+    const animeRows = OVERVIEW_CATEGORIES.find((c) => c.id === 'anime')!.rows.map((r) => r.title);
+    expect(animeRows).toContain('日本番剧');
   });
 });
 
-describe('fetchDoubanOverview', () => {
+describe('findCategorySpec', () => {
+  it('命中返回配置，未命中返回 undefined', () => {
+    expect(findCategorySpec('movie')?.name).toBe('电影');
+    expect(findCategorySpec('不存在的分类')).toBeUndefined();
+  });
+});
+
+describe('fetchDoubanCategory', () => {
   beforeEach(() => {
     cacheStore.clear();
-    mockedFetch.mockReset();
+    mockedRecommend.mockReset();
+    mockedCollection.mockReset();
   });
 
-  it('按行配置并行抓取，携带 type/tag 与固定分页参数', async () => {
-    mockedFetch.mockResolvedValue(items(3));
+  it('未知分类直接抛错，不发任何上游请求', async () => {
+    await expect(fetchDoubanCategory('nope')).rejects.toThrow('未知推荐分类');
+    expect(mockedCollection).not.toHaveBeenCalled();
+    expect(mockedRecommend).not.toHaveBeenCalled();
+  });
 
-    const rows = await fetchDoubanOverview();
+  it('合集行走合集接口，标签行走标签接口（各一次请求）', async () => {
+    mockAllOk();
 
-    expect(rows).toHaveLength(OVERVIEW_ROWS.length);
-    expect(mockedFetch).toHaveBeenCalledTimes(OVERVIEW_ROWS.length);
-    for (const row of rows) {
-      expect(row.ok).toBe(true);
-      expect(row.items).toHaveLength(3);
+    const result = await fetchDoubanCategory('movie');
+
+    expect(result.id).toBe('movie');
+    expect(result.name).toBe('电影');
+    expect(result.rows).toHaveLength(13);
+    expect(result.rows.every((r) => r.ok && r.items.length > 0)).toBe(true);
+
+    const movieCategory = findCategorySpec('movie')!;
+    const collectionRows = movieCategory.rows.filter((r) => r.collection);
+    const tagRows = movieCategory.rows.filter((r) => r.tag);
+    expect(collectionRows).toHaveLength(8);
+    expect(tagRows).toHaveLength(5);
+
+    expect(mockedCollection).toHaveBeenCalledTimes(8);
+    for (const row of collectionRows) {
+      expect(mockedCollection).toHaveBeenCalledWith(row.collection);
     }
-    // 每个分类一次请求，取首页固定条数
-    for (const spec of OVERVIEW_ROWS) {
-      expect(mockedFetch).toHaveBeenCalledWith(spec.type, spec.tag, 0, 18);
+    expect(mockedRecommend).toHaveBeenCalledTimes(5);
+    for (const row of tagRows) {
+      expect(mockedRecommend).toHaveBeenCalledWith(row.type, row.tag, 0, 18);
     }
   });
 
-  it('单个分类失败只拖垮该行，其余行照常返回', async () => {
-    mockedFetch.mockImplementation(async (_type, tag) => {
-      if (tag === '综艺') throw new Error('boom');
-      return items(2);
+  it('合集行截取到 18 条，标签行保持 18 条', async () => {
+    mockAllOk();
+
+    const result = await fetchDoubanCategory('movie');
+
+    for (const row of result.rows) {
+      expect(row.items).toHaveLength(18);
+    }
+  });
+
+  it('单个题材失败只拖垮该行，其余行照常返回', async () => {
+    mockedCollection.mockResolvedValue(items(20));
+    mockedRecommend.mockImplementation(async (_type, tag) => {
+      if (tag === '格斗') throw new Error('boom');
+      return items(18);
     });
 
-    const rows = await fetchDoubanOverview();
+    const result = await fetchDoubanCategory('movie');
 
-    const failed = rows.filter((r) => !r.ok);
+    const failed = result.rows.filter((r) => !r.ok);
     expect(failed).toHaveLength(1);
+    expect(failed[0].id).toBe('movie-fighting');
     expect(failed[0].items).toEqual([]);
-    expect(rows.filter((r) => r.ok)).toHaveLength(OVERVIEW_ROWS.length - 1);
+    expect(result.rows.filter((r) => r.ok)).toHaveLength(12);
   });
 
-  it('全部失败时抛错（接口层返回 502），不写缓存', async () => {
-    mockedFetch.mockRejectedValue(new Error('douban down'));
+  it('全部失败时抛错且不写缓存；修好后重试立即成功', async () => {
+    mockedCollection.mockRejectedValue(new Error('douban down'));
+    mockedRecommend.mockRejectedValue(new Error('douban down'));
 
-    await expect(fetchDoubanOverview()).rejects.toThrow('douban down');
+    await expect(fetchDoubanCategory('tv')).rejects.toThrow('豆瓣推荐获取失败');
     expect(cacheStore.size).toBe(0);
 
-    // 未写缓存：修好 mock 后重试应立即成功
-    mockedFetch.mockResolvedValue(items(1));
-    const rows = await fetchDoubanOverview();
-    expect(rows.every((r) => r.ok)).toBe(true);
+    mockAllOk();
+    const result = await fetchDoubanCategory('tv');
+    expect(result.rows.every((r) => r.ok)).toBe(true);
   });
 
-  it('整体结果带缓存：连续调用不重复抓取', async () => {
-    mockedFetch.mockResolvedValue(items(1));
+  it('部分失败不写缓存：再次调用会重试失败的题材行', async () => {
+    mockedCollection.mockResolvedValue(items(20));
+    mockedRecommend.mockRejectedValueOnce(new Error('boom')).mockResolvedValue(items(18));
 
-    await fetchDoubanOverview();
-    const callsAfterFirst = mockedFetch.mock.calls.length;
-    await fetchDoubanOverview();
+    // 第一次：综艺分类的纪录片行走标签接口，失败
+    await fetchDoubanCategory('variety');
+    expect(cacheStore.size).toBe(0);
 
-    expect(mockedFetch.mock.calls.length).toBe(callsAfterFirst);
+    // 第二次：重试后成功，此时才写缓存
+    const result = await fetchDoubanCategory('variety');
+    expect(result.rows.every((r) => r.ok)).toBe(true);
+    expect(cacheStore.size).toBe(1);
+  });
+
+  it('分类结果按分类分别缓存：切走再切回不重复抓取', async () => {
+    mockAllOk();
+
+    await fetchDoubanCategory('anime');
+    const animeCalls = mockedCollection.mock.calls.length + mockedRecommend.mock.calls.length;
+
+    await fetchDoubanCategory('tv');
+    await fetchDoubanCategory('anime');
+
+    const totalCalls = mockedCollection.mock.calls.length + mockedRecommend.mock.calls.length;
+    // 第二次 anime 走缓存，不再发请求
+    expect(totalCalls).toBe(animeCalls + 7); // tv 分类 7 行
   });
 });
